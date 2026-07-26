@@ -1,0 +1,17 @@
+{
+	"name": "bo-toolkit",
+	"description": "Bo's personal Claude Code plugins: shared project conventions installed per-repo rather than copy-pasted.",
+	"owner": {
+		"name": "Bo White",
+		"url": "https://github.com/bowhite"
+	},
+	"plugins": [
+		{
+			"name": "bo-standards",
+			"source": "./plugins/bo-standards",
+			"description": "Bo's project conventions: uv + ruff + ty for Python, Biome for JS/TS/CSS/JSON, per-edit autoformatting, Bash guardrails, and skills for adopting, scaffolding, checking, and CI-ing a project.",
+			"version": "0.1.0",
+			"author": { "name": "Bo White" }
+		}
+	]
+}

@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.ruff_cache/
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+*.egg-info/
+
+# Node
+node_modules/
+.vite/
+
+# Claude Code
+# Only the local-override file is ignored. .claude/settings.json carries the
+# per-project plugin wiring and MUST be committed -- see README.
+.claude/settings.local.json
+
+# macOS
+.DS_Store

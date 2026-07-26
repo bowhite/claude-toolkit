@@ -1,0 +1,13 @@
+{
+	"name": "bo-standards",
+	"displayName": "Bo's Standards",
+	"version": "0.1.0",
+	"description": "Bo's project conventions: uv + ruff + ty for Python, Biome for JS/TS/CSS/JSON, per-edit autoformatting, Bash guardrails, and skills for adopting, scaffolding, checking, and CI-ing a project.",
+	"author": {
+		"name": "Bo White",
+		"url": "https://github.com/bowhite"
+	},
+	"repository": "https://github.com/bowhite/claude-toolkit",
+	"license": "MIT",
+	"keywords": ["uv", "ruff", "ty", "biome", "python", "formatting", "ci"]
+}

@@ -1,0 +1,16 @@
+{
+	"hooks": {
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write|NotebookEdit",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "\"${CLAUDE_PLUGIN_ROOT}\"/scripts/format.sh",
+						"timeout": 30
+					}
+				]
+			}
+		]
+	}
+}
