@@ -1,0 +1,13 @@
+{
+	"extraKnownMarketplaces": {
+		"bo-toolkit": {
+			"source": {
+				"source": "github",
+				"repo": "bowhite/claude-toolkit"
+			}
+		}
+	},
+	"enabledPlugins": {
+		"bo-standards@bo-toolkit": true
+	}
+}
