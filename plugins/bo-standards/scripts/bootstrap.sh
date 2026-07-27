@@ -17,6 +17,20 @@
 
 set -uo pipefail
 
+# Put the locations these installers write to on PATH up front.
+#
+# Without this the script is not actually idempotent: the Astral installer puts
+# uv in ~/.local/bin and updates the shell profile, but a non-login,
+# non-interactive shell never sources that profile -- so a second run does not
+# see uv and reinstalls it every time. Same story for fnm's node.
+for d in "$HOME/.local/bin" "$HOME/.local/share/fnm" /opt/homebrew/bin /usr/local/bin; do
+  [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
+done
+for d in "$HOME"/.nvm/versions/node/*/bin "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
+  [ -d "$d" ] && PATH="$d:$PATH"
+done
+export PATH
+
 SKIP_PROJECT=0
 [ "${1:-}" = "--no-project" ] && SKIP_PROJECT=1
 
@@ -101,15 +115,33 @@ install_node() {
   case "$PLATFORM" in
     macos) pkg_install node ;;
     linux)
-      # Debian's `nodejs` package is usually far behind. Prefer fnm, which is a
-      # single binary, needs no root, and lets the version float per project.
-      if curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell >/dev/null 2>&1; then
+      # Debian's `nodejs` package is far behind -- bookworm ships Node 18, which
+      # is past end of life. Prefer fnm: a single binary, no root needed, and the
+      # version can float per project.
+      #
+      # fnm's installer hard-requires unzip and exits if it is missing. Without
+      # installing it first this whole branch fails its dependency check and
+      # falls through to the apt fallback, which looks like success (node exists)
+      # while silently leaving you on an EOL runtime.
+      apt_install unzip
+
+      if curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell >/dev/null 2>&1 \
+         && [ -x "$HOME/.local/share/fnm/fnm" ]; then
         export PATH="$HOME/.local/share/fnm:$PATH"
-        eval "$(fnm env)" 2>/dev/null || true
-        fnm install --lts >/dev/null 2>&1 && fnm use --lts >/dev/null 2>&1
-      else
-        apt_install nodejs npm
+        eval "$(fnm env --shell bash)" 2>/dev/null || true
+        if fnm install --lts >/dev/null 2>&1; then
+          fnm default lts-latest >/dev/null 2>&1 || fnm use --lts >/dev/null 2>&1
+          # Make the freshly installed node visible to the rest of this script
+          # and to `ensure`'s command -v check.
+          for d in "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
+            [ -d "$d" ] && PATH="$d:$PATH"
+          done
+          export PATH
+        fi
       fi
+
+      # Fall back only if fnm genuinely did not produce a usable node.
+      command -v node >/dev/null 2>&1 || apt_install nodejs npm
       ;;
   esac
 }
@@ -180,6 +212,39 @@ if [ "$SKIP_PROJECT" -eq 0 ]; then
     fi
   fi
 fi
+
+# ---------------------------------------------------------------- profile ---
+# uv's installer edits the shell profile; fnm's does not when run with
+# --skip-shell. Without this block, node is installed but invisible to the next
+# shell, and the failure surfaces much later as
+# `/usr/bin/env: 'node': No such file or directory` from a tool shim.
+#
+# Guarded by a marker so re-running never appends a second copy.
+write_profile_block() {
+  local marker="# >>> bo-standards bootstrap >>>"
+  local rc
+  for rc in "$HOME/.profile" "$HOME/.bashrc" "$HOME/.zshrc"; do
+    [ -e "$rc" ] || continue
+    grep -qF "$marker" "$rc" 2>/dev/null && continue
+    cat >> "$rc" <<'PROFILE'
+
+# >>> bo-standards bootstrap >>>
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+for _d in "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
+  [ -d "$_d" ] && PATH="$_d:$PATH"
+done
+unset _d
+export PATH
+# <<< bo-standards bootstrap <<<
+PROFILE
+    log "PATH block added to $rc"
+  done
+}
+
+# Linux only. On macOS, Homebrew and nvm already put these on PATH through the
+# user's existing shell setup, so appending here would be redundant edits to a
+# config file this script has no business touching.
+[ "$PLATFORM" = linux ] && write_profile_block
 
 # ---------------------------------------------------------------- summary ----
 

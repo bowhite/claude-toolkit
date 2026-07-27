@@ -11,7 +11,14 @@
 # or the Astral installer are not on PATH unless we put them there.
 harden_path() {
   PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-  for d in "$HOME"/.nvm/versions/node/*/bin; do
+  # Node managers keep their binaries outside the system prefix. fnm matters as
+  # much as nvm here: bootstrap.sh installs node via fnm on Linux, and a tool
+  # shim like node_modules/.bin/biome is `#!/usr/bin/env node` -- so if node is
+  # not on PATH, biome fails with a confusing "env: node: No such file or
+  # directory" rather than anything that points at the real cause.
+  for d in "$HOME"/.nvm/versions/node/*/bin \
+           "$HOME"/.local/share/fnm/node-versions/*/installation/bin \
+           "$HOME"/.fnm/node-versions/*/installation/bin; do
     [ -d "$d" ] && PATH="$d:$PATH"
   done
   export PATH
