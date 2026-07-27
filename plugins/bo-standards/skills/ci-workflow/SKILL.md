@@ -32,13 +32,22 @@ it with an extra CI step.
 
 ## Check the action versions
 
-Pin to current major versions and verify rather than trusting memory —
-`astral-sh/setup-uv`, `actions/checkout`, and `actions/setup-node` all move.
-If `gh` is authenticated, the fastest check is the repo's releases:
+Verify rather than trusting memory — `astral-sh/setup-uv`, `actions/checkout`,
+and `actions/setup-node` all move, and the template in this plugin has been
+stale before.
+
+**Check the tags, not the latest release.** Those are different things, and the
+difference has already broken a CI run: `astral-sh/setup-uv` publishes
+`v9.0.0` but **no floating `v9` tag**, so `@v9` fails to resolve with
+`unable to find version` even though the release query says v9. `actions/*` do
+publish floating majors.
 
 ```bash
-gh api repos/astral-sh/setup-uv/releases/latest --jq .tag_name
+gh api repos/astral-sh/setup-uv/tags --jq '.[].name' | head -5
 ```
+
+Use a floating major (`@v7`) where one exists; pin the full version
+(`@v9.0.0`) where it does not.
 
 ## The workflow scope caveat
 
