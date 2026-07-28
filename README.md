@@ -10,7 +10,7 @@ per repo instead of copy-pasted into each one.
 | Language | Format & lint | Types |
 |---|---|---|
 | Python | `ruff` | `ty` |
-| JS / TS / JSX / TSX / CSS / JSON | `biome` | — |
+| JS / TS / JSX / TSX / CSS / JSON | `biome` | `tsc --noEmit` |
 | Markdown | *nothing, deliberately* | — |
 
 Not used, and blocked by the Bash guard: **prettier, eslint, markdownlint,
@@ -21,6 +21,32 @@ Markdown is untooled on purpose. Biome does not format it (verified against
 2.5.3 — `.md` passes through byte-for-byte unchanged), and nothing else was
 added to fill the gap.
 
+**Biome does no type checking at all**, which is why `tsc --noEmit` is separate.
+Without it a TypeScript project is linted and formatted but never type-checked.
+
+---
+
+## What actually happens when you install
+
+Installing is **mechanical and safe — it never edits your files.** This is the
+most common point of confusion, so, precisely:
+
+| | Active immediately? |
+|---|---|
+| Format hook, Bash guard, session-start | ✅ **yes**, from the next session |
+| The 7 skills | ⚠️ **available, but only run when invoked** — by you (`/lint`) or when Claude judges one applies |
+| Templates | ❌ **inert files.** Nothing reads them unless a skill does |
+| `pyproject.toml`, dev dependencies | ❌ **untouched** |
+
+So on a fresh install the hooks run but **do nothing to Python files**, because
+`format.sh` looks for `.venv/bin/ruff` and finds nothing.
+
+**Run `adopt-standards` to actually onboard a repo.** That is the step that
+installs `ruff`/`ty`/`pytest`, writes the config from
+`templates/pyproject-snippet.toml`, and wires `.claude/settings.json`. Install
+and adopt are deliberately separate so installing can never surprise you with a
+50-finding diff.
+
 ## Install
 
 Per project, never globally. From inside the target repo:
@@ -30,16 +56,33 @@ claude plugin marketplace add bowhite/claude-toolkit --scope project && claude p
 ```
 
 That writes `.claude/settings.json`, which **must be committed**. It is what
-carries the plugin into a fresh clone or a Claude Desktop cloud sandbox.
-Gitignore only `.claude/settings.local.json` — never `.claude/` wholesale.
+carries the plugin into a fresh clone or a cloud sandbox. Gitignore only
+`.claude/settings.local.json` — never `.claude/` wholesale.
 
-Tooling is a per-project dev dependency too:
+Then, in the repo:
 
 ```bash
-uv add --dev ruff ty pytest && npm i -D @biomejs/biome
+./scripts/bootstrap.sh
 ```
 
-Run `adopt-standards` to do all of the above at once.
+…and ask Claude to run the **`adopt-standards`** skill.
+
+## Updating
+
+The marketplace cache is **a git clone of this repo**, so updates are a pull:
+
+```bash
+claude plugin marketplace update bo-toolkit
+```
+
+Then **restart Claude Code** — hooks and skills are read at session start.
+
+Nothing prompts users automatically. Pushing a commit here does not reach an
+installed copy until someone runs that command, and `claude plugin details`
+keeps reporting the old inventory until the session restarts. If you change a
+hook, say so — a stale copy fails silently rather than loudly.
+
+---
 
 ## Hooks
 
@@ -47,13 +90,19 @@ Run `adopt-standards` to do all of the above at once.
 |---|---|---|
 | `format.sh` | `PostToolUse` (`Edit\|Write\|NotebookEdit`) | Formats the edited file. Exit 2 feeds unfixable diagnostics back to Claude. |
 | `guard-bash.sh` | `PreToolUse` (`Bash`) | Blocks destructive and off-toolchain commands. Exit 2 prevents the call. |
-| `session-start.sh` | `SessionStart` | Prints working tree, recent commits, and a hint if dependencies are missing. |
+| `session-start.sh` | `SessionStart` | Working tree, recent commits, and a hint when dependencies are missing. |
 
 There is **no `Stop` hook**. Nothing slow runs on a turn boundary; verification
 is the deliberate `pr-check` step and CI.
 
-A missing tool is always a silent skip, never an error — a repo that has not
-adopted yet should not have every edit fail.
+A missing tool is a silent skip for Python, and a **once-per-project warning**
+for JS/TS — an unformatted file that looks identical to success was worse than a
+little noise.
+
+The Node project is found by walking up from the edited file to the nearest
+`package.json`, so a `frontend/` subdirectory works. Biome resolves from
+`node_modules/.bin` only — **never `npx`**, which downloads an unpinned latest
+from the network and silently disagrees with CI.
 
 ### What the guard blocks
 
@@ -62,60 +111,116 @@ adopted yet should not have every edit fail.
 `package-lock.json` · bare `pip install` (`uv pip install` is fine) ·
 prettier / eslint / markdownlint · mypy / pyright
 
-**This is not a security boundary.** It is pattern matching over a shell
-command string. It catches mistakes and habits. It does not catch `eval`,
-base64'd payloads, variable indirection, or a `cd` elsewhere first. Treat it as
-a seatbelt.
+**This is not a security boundary.** It is pattern matching over a shell command
+string. It catches mistakes and habits, not `eval`, base64'd payloads, variable
+indirection, or a `cd` elsewhere first. A seatbelt.
 
 ## Skills
 
 | Skill | Use it when |
 |---|---|
-| `adopt-standards` | Onboarding an existing repo |
+| `adopt-standards` | Onboarding an existing repo — **the step that edits your config** |
 | `scaffold-project` | Starting a new one |
 | `lint` | Whole-repo format, lint, and type-check pass |
 | `pr-check` | Before opening a PR |
 | `ci-workflow` | Generating or repairing `.github/workflows/ci.yml` |
+| `update-docs` | README/CLAUDE.md/docstrings have drifted from the code |
+| `fix-security` | Dependabot alerts, leaked credentials, CVEs, code scanning |
+
+## Templates
+
+Single sources of truth. Skills read these rather than restating them, so
+scaffold, adopt, and CI cannot drift apart.
+
+| Template | What it is |
+|---|---|
+| `pyproject-snippet.toml` | **The canonical ruff/ty/pytest config** |
+| `biome.json` | Biome config with VCS ignore handling on |
+| `ci.yml`, `codeql.yml`, `dependabot.yml` | CI and security workflows |
+| `CLAUDE.md` | Project memory, conventions section included |
+| `settings.json` | Per-project plugin wiring |
+| `CODEOWNERS` | **Comments only — no owner assigned.** See below |
+| `PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/` | GitHub templates |
 
 ## Delegated to official Anthropic plugins
 
-`bo-standards` owns only what nothing official knows about. Everything else is
-someone else's job:
+`bo-standards` owns only what nothing official knows about:
 
-- **Commit, push, open PR** → `commit-commands` (`/commit`, `/commit-push-pr`)
+- **Commit, push, open PR** → `commit-commands`
 - **PR review** → `pr-review-toolkit`, `code-review`
 - **Docstring accuracy** → `pr-review-toolkit:comment-analyzer`
 - **CLAUDE.md upkeep** → `claude-md-management`
 - **Library docs** → `context7`
+- **Security guidance** → `security-guidance`
 - **GitHub API** → the `gh` CLI, not the GitHub MCP server
+
+```bash
+./plugins/bo-standards/scripts/install-plugins.sh
+```
+
+Installs that set at user scope, idempotently. Deliberately excluded:
+`pyright-lsp` (this toolchain uses `ty`) and `github` (the `gh` CLI covers it).
+
+There is **no first-party Anthropic plugin for authoring documentation or for
+remediating security findings** — `context7` only looks docs up. That gap is why
+`update-docs` and `fix-security` are in this plugin.
+
+## Migrating from a user-level hook
+
+If a machine still has the pre-plugin `~/.claude/hooks/lint-format.sh` and
+`/lint` command, retire them — otherwise two formatters run on every edit and
+the old one still reformats Markdown:
+
+```bash
+./plugins/bo-standards/scripts/migrate-user-hooks.sh --dry-run
+```
+
+Renames both to `*.retired`, backs up `settings.json`, and removes only the
+`PostToolUse` block. **Nothing is deleted** — `~/.claude` is not version
+controlled, so a delete there is unrecoverable.
 
 ## bootstrap.sh
 
-Installs only what uv and npm cannot provide — `uv`, `node`, `jq`, `gh`, `git` —
-then runs `uv sync` and `npm ci`. This is what makes a repo usable in a cloud
-sandbox that starts with nothing.
+Installs only what uv and npm cannot provide — `uv`, `node`, `jq`, `gh`, `git`,
+`gitleaks` — then runs `uv sync` and `npm ci`.
 
 ```bash
 ./scripts/bootstrap.sh              # tooling + project dependencies
 ./scripts/bootstrap.sh --no-project # tooling only
 ```
 
-Idempotent: every step is guarded, and a second run installs nothing.
+Idempotent: a second run installs nothing.
 
 **Verified on macOS 26 (arm64) and Debian bookworm (arm64)**, the latter in an
-Apple `container` VM. On Linux it installs Node via fnm (Debian's apt package is
-Node 18, past EOL) and appends a marker-guarded `PATH` block to the shell
-profile. It does **not** touch shell profiles on macOS, where brew and nvm
-already handle this.
+Apple `container` VM.
+
+### Without root or sudo
+
+Everything except `git` installs into `~/.local/bin` with no privileges:
+
+| Tool | No-sudo Debian |
+|---|---|
+| `uv`, `jq`, `gh`, `gitleaks` | ✅ release binaries into `~/.local/bin` |
+| `node` | ✅ official tarball into `~/.local/node` |
+| `git` | ❌ needs a package manager — reported, exit 1 |
+
+`jq` matters most: both hooks parse hook JSON with it, so without `jq` they
+silently do nothing.
+
+Missing tools are always reported by name with a non-zero exit — never a silent
+partial success. On Linux a marker-guarded `PATH` block is appended to the shell
+profile; **macOS profiles are never touched**, since brew and nvm already handle
+it.
+
+---
 
 ## Canonical Python config
 
-Emitted identically by `scaffold-project`, `adopt-standards`, and
-`ci-workflow`:
+In `templates/pyproject-snippet.toml`:
 
 ```toml
 [tool.ruff.lint]
-extend-select = ["I", "UP", "B", "SIM", "ANN", "PYI", "D"]
+extend-select = ["ANN", "PYI", "D"]
 preview = true
 
 [tool.ruff.lint.pydocstyle]
@@ -126,53 +231,83 @@ missing-type-argument = "error"
 possibly-unresolved-reference = "warn"
 ```
 
-Astral's own recommendation is `["ANN", "PYI"]` plus `preview`, extending ruff's
-default `select` of `["E4", "E7", "E9", "F"]`. That default drops import sorting
-and three advisory families, so `I`, `UP`, `B`, and `SIM` are kept explicitly —
-making this a strict superset of both Astral's recommendation and what these
-repos already passed.
+This is [Astral's documented recommendation](https://docs.astral.sh/ty/coming-from-mypy-or-pyright/)
+plus `D` for docstrings.
+
+**Do not add `I`, `UP`, `B`, or `SIM`** — ruff 0.16 enables them by default.
+Verified behaviourally: `ruff check --isolated` with no config at all flags
+`I001`, `UP045`, `SIM102`, and `BLE001`. (Older ruff defaulted to just
+`E4/E7/E9/F`, which is where the belief they are needed comes from.) Measured on
+real repos, adding them changes the finding count by 0–1.
+
+`D` is the entire adoption cost: on one repo it took the count from 12 to 56.
 
 ## Adopting an existing repo
 
-The `D` (docstring) rules dominate the cost: roughly 50 findings on a mature
-repo, ~44 of them simply missing docstrings, only a handful auto-fixable.
-
-`adopt-standards` therefore records what remains as a burn-down rather than
-demanding it all up front:
+`adopt-standards` records pre-existing violations as a burn-down rather than
+demanding they all be fixed at once:
 
 ```toml
 [tool.ruff.lint.per-file-ignores]
 "src/pkg/legacy.py" = ["D103"]
 ```
 
-The repo is green immediately, new code is held to the full ruleset, and the
-debt is countable. **The block only works if it shrinks** — if it is the same
-size in three months, drop `D` rather than keep an ignore list pretending to be
-a plan.
+Green on day one, new code held to the full ruleset, debt countable. **It only
+works if it shrinks** — if the block is the same size in three months, drop `D`
+rather than keep an ignore list pretending to be a plan.
+
+---
 
 ## GitHub conventions
 
-New repos get: default branch `main` (set explicitly — `init.defaultBranch` is
-usually unset and git still creates `master`), `.github/CODEOWNERS` with
-`* @bowhite`, delete-branch-on-merge, PR and issue templates.
+New repos get: **private**, default branch `main` (set explicitly — `init.defaultBranch`
+is usually unset and git still creates `master`), delete-branch-on-merge, PR and
+issue templates, and an empty CODEOWNERS.
 
-**No branch protection or rulesets are configured.** Deliberate, and it has
-consequences worth knowing:
-
-- `main` accepts direct pushes, and a red PR can still be merged. CI is
-  advisory, which makes `pr-check` the only real gate.
-- CODEOWNERS still auto-requests review — that needs no protection — but nothing
-  enforces it.
-- Auto-merge rarely surfaces, since GitHub only offers it on a PR blocked by a
-  required check.
-
-Also: **`allow_auto_merge` cannot be enabled on a private repo** on a free plan.
-The CLI exits 0 and the API returns success while the value stays `false`.
-Always verify rather than trust the exit code:
+Auto-merge is always attempted, then **read back and reported honestly**:
 
 ```bash
 gh api repos/<owner>/<name> --jq '{private, allow_auto_merge, delete_branch_on_merge}'
 ```
+
+**`allow_auto_merge` cannot be enabled on a private repo** on a free plan. The
+CLI exits 0 and the API returns success while the value stays `false` — verified,
+it flipped to `true` the moment the repo was made public. Never trust the exit
+code.
+
+### CODEOWNERS is empty on purpose
+
+`* @yourself` is actively harmful on a solo repo: **GitHub will not let a PR
+author approve their own PR**, so pairing it with a required-review rule makes
+every PR you open permanently unmergeable. `templates/CODEOWNERS` ships as
+comments explaining the format. Assign an owner when a second person genuinely
+reviews — e.g. `* @your-boss`.
+
+### Stopping Claude from pushing to main
+
+On a repo where you and Claude are the only contributors, required reviews
+cannot work — there is no second human. Use a **ruleset with a required status
+check** instead, which needs no reviewer:
+
+```bash
+gh api -X POST repos/<owner>/<name>/rulesets --input ruleset.json
+```
+
+with `ruleset.json` targeting `refs/heads/main` and enforcing:
+
+- `deletion` and `non_fast_forward` — no force-push, no deleting main
+- `pull_request` with `required_approving_review_count: 0` — pushes must go
+  through a PR, but you can still merge it yourself
+- `required_status_checks` on your CI check — **a red PR cannot be merged**
+
+That gives the property you want: **Claude cannot push to `main`, and its PRs
+can never merge without CI passing.** Add yourself as a bypass actor only if you
+want an escape hatch; leaving it off means the rule applies to you too.
+
+Note rulesets on **private** repos require a paid plan; on public repos they are
+free. The plugin does not configure them by default.
+
+---
 
 ## Repo layout
 
@@ -181,20 +316,22 @@ gh api repos/<owner>/<name> --jq '{private, allow_auto_merge, delete_branch_on_m
 plugins/bo-standards/
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
-├── scripts/       lib.sh, bootstrap.sh, format.sh, guard-bash.sh, session-start.sh
-├── skills/        adopt-standards, ci-workflow, lint, pr-check, scaffold-project
-└── templates/     biome.json, ci.yml, CLAUDE.md, settings.json, PR + issue templates
+├── scripts/    lib.sh, bootstrap.sh, format.sh, guard-bash.sh, session-start.sh,
+│               install-plugins.sh, migrate-user-hooks.sh
+├── skills/     adopt-standards, ci-workflow, fix-security, lint, pr-check,
+│               scaffold-project, update-docs
+└── templates/  pyproject-snippet.toml, biome.json, ci.yml, codeql.yml,
+                dependabot.yml, CLAUDE.md, settings.json, CODEOWNERS,
+                PULL_REQUEST_TEMPLATE.md, ISSUE_TEMPLATE/
 ```
 
-## Changing the plugin
+## Developing the plugin
 
-Because installs resolve the marketplace from GitHub, a change is not visible to
-other repos until it is pushed. For iterating on the plugin itself, install from
-the working tree instead:
+Installs resolve the marketplace from GitHub, so a change is invisible to other
+repos until pushed. To iterate locally, install from the working tree:
 
 ```bash
 claude plugin marketplace add /path/to/claude-toolkit --scope local
 ```
 
-After editing, run `claude plugin validate .` and restart the session — hooks
-are read at session start.
+After editing, `claude plugin validate .` and restart the session.
