@@ -53,10 +53,28 @@ case "$file" in
     ;;
 
   *.js|*.jsx|*.ts|*.tsx|*.mjs|*.cjs|*.json|*.jsonc|*.css)
-    biome=$(find_biome "$root")
-    [ -z "$biome" ] && exit 0
-    "$biome" check --write --no-errors-on-unmatched "$file" >/dev/null 2>&1
-    if ! out=$("$biome" check --no-errors-on-unmatched "$file" 2>&1); then
+    # The Node project may live in a subdirectory (frontend/), not at the repo
+    # root -- resolve it from the file upwards.
+    node_dir=$(find_node_dir "$(dirname "$file")" "$root") || node_dir=""
+    biome=""
+    [ -n "$node_dir" ] && biome=$(find_biome "$node_dir")
+
+    if [ -z "$biome" ]; then
+      # Say so once. Silently leaving the file unformatted looked identical to
+      # success and let unformatted code accumulate unnoticed.
+      if [ -z "$node_dir" ]; then
+        warn_once "$root:nonode" \
+          "bo-standards: $(basename "$file") was not formatted -- no package.json found under $root. Run the adopt-standards skill to set up Biome."
+      else
+        warn_once "$node_dir:nobiome" \
+          "bo-standards: $(basename "$file") was not formatted -- Biome is not installed in $node_dir. Run: (cd $node_dir && npm i -D @biomejs/biome)"
+      fi
+      exit 0
+    fi
+
+    # Run from the Node project directory so biome.json is discovered.
+    (cd "$node_dir" && "$biome" check --write --no-errors-on-unmatched "$file") >/dev/null 2>&1
+    if ! out=$(cd "$node_dir" && "$biome" check --no-errors-on-unmatched "$file" 2>&1); then
       remaining="$out"; had_issues=1
     fi
     ;;

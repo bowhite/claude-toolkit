@@ -146,6 +146,29 @@ install_node() {
   esac
 }
 
+install_gitleaks() {
+  case "$PLATFORM" in
+    macos) pkg_install gitleaks ;;
+    linux)
+      # Not in Debian's repos; take the release binary. Architecture naming
+      # follows the project's own release assets.
+      local ver arch os_tag
+      ver=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+            | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
+      [ -z "$ver" ] && return 1
+      case "$(uname -m)" in
+        aarch64|arm64) arch=arm64 ;;
+        x86_64)        arch=x64 ;;
+        *)             return 1 ;;
+      esac
+      os_tag=linux
+      curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_${os_tag}_${arch}.tar.gz" \
+        | tar -xz -C "$HOME/.local/bin" gitleaks 2>/dev/null
+      chmod +x "$HOME/.local/bin/gitleaks" 2>/dev/null
+      ;;
+  esac
+}
+
 install_gh() {
   case "$PLATFORM" in
     macos) pkg_install gh ;;
@@ -178,6 +201,7 @@ ensure jq   install_jq
 ensure uv   install_uv
 ensure node install_node
 ensure gh   install_gh
+ensure gitleaks install_gitleaks
 
 # ---------------------------------------------------------------- project ----
 

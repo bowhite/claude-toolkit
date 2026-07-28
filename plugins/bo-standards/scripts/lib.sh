@@ -40,10 +40,46 @@ find_ruff() {
   [ -x "$root/.venv/bin/ruff" ] && printf '%s\n' "$root/.venv/bin/ruff"
 }
 
-# find_biome <root> : path to the project's biome, or empty.
+# find_node_dir <startdir> <root> : nearest ancestor of startdir (stopping at
+# root) that contains a package.json, or empty.
+#
+# The Node project is frequently NOT at the repo root -- two of three Node
+# projects here keep it in `frontend/`. Assuming the root silently skipped those
+# repos entirely, so walk up from the edited file instead.
+find_node_dir() {
+  local dir="$1" root="$2"
+  [ -d "$dir" ] || dir=$(dirname "$dir")
+  while :; do
+    [ -f "$dir/package.json" ] && { printf '%s\n' "$dir"; return 0; }
+    [ "$dir" = "$root" ] || [ "$dir" = "/" ] && return 1
+    dir=$(dirname "$dir")
+  done
+}
+
+# find_biome <dir> : path to the biome installed for <dir>, or empty.
+#
+# Deliberately does NOT fall back to `npx @biomejs/biome` or a global binary.
+# npx silently downloads an unpinned latest from the network, which is exactly
+# the version drift that per-project dev dependencies exist to prevent -- a
+# formatter that disagrees with CI is worse than no formatter.
 find_biome() {
-  local root="$1"
-  [ -x "$root/node_modules/.bin/biome" ] && printf '%s\n' "$root/node_modules/.bin/biome"
+  local dir="$1"
+  [ -x "$dir/node_modules/.bin/biome" ] && printf '%s\n' "$dir/node_modules/.bin/biome"
+}
+
+# warn_once <key> <message> : emit message on stderr the first time this key is
+# seen for this project, then stay quiet.
+#
+# Used so "biome is not installed here" surfaces once rather than either
+# spamming every edit or -- as it did before -- vanishing entirely and leaving
+# files silently unformatted.
+warn_once() {
+  local key="$1" msg="$2"
+  local stamp="${TMPDIR:-/tmp}/bo-standards-warn-$(printf '%s' "$key" | shasum | cut -c1-16)"
+  [ -e "$stamp" ] && return 1
+  : > "$stamp"
+  printf '%s\n' "$msg" >&2
+  return 0
 }
 
 # hook_input : the raw hook JSON from stdin.
