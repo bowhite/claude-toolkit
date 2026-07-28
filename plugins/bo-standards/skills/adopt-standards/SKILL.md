@@ -46,24 +46,14 @@ and copy `templates/biome.json` to the repo root if absent.
 
 ## 4. Canonical config
 
-Splice into `pyproject.toml`, preserving anything already there:
+**Read `templates/pyproject-snippet.toml` and splice its blocks into
+`pyproject.toml`.** That file is the single source of truth — do not retype the
+config from memory, or scaffold, adopt, and CI will drift apart.
 
-```toml
-[tool.ruff.lint]
-# Astral's documented recommendation is ["ANN", "PYI"] + preview. "D" is the one
-# addition: docstrings. Do NOT re-add I/UP/B/SIM -- ruff 0.16 enables those by
-# default (verified behaviourally: defaults alone flag I001, UP045, SIM102,
-# BLE001), so listing them is redundant.
-extend-select = ["ANN", "PYI", "D"]
-preview = true
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ty.rules]
-missing-type-argument = "error"
-possibly-unresolved-reference = "warn"
-```
+**Merge, do not overwrite.** Preserve any `ignore` list, per-file-ignores, or
+`[tool.pytest.ini_options]` the project already has. If it already sets
+`extend-select`, union the values rather than replacing them, and say what you
+merged.
 
 **Remove any `[tool.mypy]` block and drop `mypy` from dev dependencies.** `ty`
 replaces it. Two type checkers with different opinions is the problem, not a

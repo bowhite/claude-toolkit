@@ -1,0 +1,45 @@
+# Canonical Python tooling config for bo-standards.
+#
+# THIS FILE IS THE SINGLE SOURCE OF TRUTH. `adopt-standards`, `scaffold-project`,
+# and `ci-workflow` all splice these exact blocks into a project's
+# pyproject.toml. Do not restate them in a skill -- change them here.
+#
+# Merge into an existing pyproject.toml rather than overwriting: preserve any
+# `ignore` list or per-file-ignores the project already had.
+
+[tool.ruff.lint]
+# Astral's documented recommendation is ["ANN", "PYI"] + preview
+# (https://docs.astral.sh/ty/coming-from-mypy-or-pyright/). "D" is the one
+# addition here: docstrings.
+#
+# Do NOT add I/UP/B/SIM. ruff 0.16 enables them by default -- verified
+# behaviourally, `ruff check --isolated` with no config flags I001, UP045,
+# SIM102 and BLE001. Listing them is redundant. (Older ruff defaulted to only
+# E4/E7/E9/F, which is where the belief that they are needed comes from.)
+extend-select = ["ANN", "PYI", "D"]
+preview = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ty.environment]
+# Only needed when importable modules live outside the package root -- e.g. a
+# directory of scripts that import each other by bare name. ty cannot see a
+# sys.path mutation made in conftest.py, so it has to be declared statically.
+# Delete this block if the project is a normal package.
+# extra-paths = ["preprocessing"]
+
+[tool.ty.rules]
+missing-type-argument = "error"
+possibly-unresolved-reference = "warn"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+# Adoption burn-down. `adopt-standards` writes entries here for violations that
+# already existed, so a repo goes green on day one while new code is still held
+# to the full ruleset. Delete entries as they are fixed; this block should
+# shrink to nothing. Never add a new file here.
+#
+# [tool.ruff.lint.per-file-ignores]
+# "src/pkg/legacy.py" = ["D103"]

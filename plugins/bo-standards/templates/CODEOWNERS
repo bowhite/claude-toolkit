@@ -1,0 +1,36 @@
+# CODEOWNERS — deliberately empty.
+#
+# No owners are assigned by default. Uncomment and edit a pattern below when you
+# actually want review requested from someone.
+#
+# WHY EMPTY: on a repo where you are the only human, `* @you` does nothing
+# useful. GitHub will not let a PR author approve their own PR, so pairing it
+# with a required-review rule makes every PR you open permanently unmergeable.
+# Without a required-review rule it just auto-requests review from yourself,
+# which is noise.
+#
+# ---------------------------------------------------------------- format ----
+#
+# Later matches win. Paths are gitignore-style, relative to the repo root.
+#
+#   *                       @octocat            every file
+#   *.py                    @octocat            by extension
+#   /docs/                  @octocat @other     a directory (and everything in it)
+#   /src/api/               @team-name          multiple owners allowed
+#   /migrations/            @dba                narrow ownership of risky paths
+#
+# Owners must have write access to the repo, or GitHub silently ignores the
+# entry. Teams are written @org/team-name.
+#
+# ------------------------------------------------------- when to use it -----
+#
+# WORKING WITH SOMEONE ELSE (e.g. your boss reviews your work):
+#   *  @their-github-handle
+# Combine with a ruleset requiring 1 approving review and "require review from
+# Code Owners". Now their approval is actually required.
+#
+# SOLO, OR JUST YOU AND CLAUDE:
+#   Leave this file empty. Required reviews cannot work with one human.
+#   Protect main with a ruleset instead -- see README, "Stopping Claude from
+#   pushing to main". A required CI status check does the real work: it blocks
+#   direct pushes and blocks merging a red PR, without needing a second person.

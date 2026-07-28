@@ -21,25 +21,10 @@ Use `-b main` **explicitly**. `init.defaultBranch` is unset on this machine, so
 git otherwise creates `master` — that is exactly how one existing repo ended up
 on the wrong branch name.
 
-Then add to `pyproject.toml`:
-
-```toml
-[tool.ruff.lint]
-# Astral's recommendation + "D". ruff 0.16 already defaults to I/UP/B/SIM, so
-# those are deliberately not listed.
-extend-select = ["ANN", "PYI", "D"]
-preview = true
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
-
-[tool.ty.rules]
-missing-type-argument = "error"
-possibly-unresolved-reference = "warn"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-```
+Then append the tooling config from **`templates/pyproject-snippet.toml`** to
+`pyproject.toml`. That file is the single source of truth — read it and copy the
+blocks rather than typing the config from memory, so scaffold, adopt, and CI can
+never disagree.
 
 ## 2. Files
 
@@ -52,7 +37,8 @@ testpaths = ["tests"]
 | `.github/workflows/ci.yml` | via the `ci-workflow` skill |
 | `.github/PULL_REQUEST_TEMPLATE.md` | `templates/PULL_REQUEST_TEMPLATE.md` |
 | `.github/ISSUE_TEMPLATE/` | `templates/ISSUE_TEMPLATE/` |
-| `.github/CODEOWNERS` | `* @bowhite` |
+| `.github/CODEOWNERS` | `templates/CODEOWNERS` — **comments only, no owner assigned**. Do not write `* @bowhite`: GitHub forbids approving your own PR, so on a solo repo that plus a required-review rule makes every PR permanently unmergeable. Assign an owner only when a second person really reviews. |
+| `pyproject.toml` tooling blocks | `templates/pyproject-snippet.toml` — the single source of truth; do not retype the config |
 | `tests/test_smoke.py` | one real test that imports the package and asserts something true |
 
 Write a docstring on every function you generate. The `D` rules are on from
@@ -93,23 +79,40 @@ gh repo edit --enable-auto-merge --delete-branch-on-merge
 
 Repos are **private by default** — ask before creating a public one.
 
-### Two things that will not work as expected
+### Always attempt auto-merge, then verify
 
-- **`--enable-auto-merge` silently fails on private repos.** The command exits
-  0, a direct `gh api -X PATCH ... allow_auto_merge=true` returns success, and
-  the value stays `false`. It is plan-gated. Verify rather than assume:
+Try to enable it on every repo, and treat failure as informational rather than
+an error:
 
-  ```bash
-  gh api repos/<owner>/<name> --jq '{private, allow_auto_merge, delete_branch_on_merge}'
-  ```
+```bash
+gh repo edit --enable-auto-merge --delete-branch-on-merge 2>/dev/null || true
+gh api repos/<owner>/<name> --jq '{private, allow_auto_merge, delete_branch_on_merge}'
+```
 
-  If it did not take, say so — do not report auto-merge as enabled.
+**`allow_auto_merge` silently fails on private repos.** `gh repo edit` exits 0
+and a direct `gh api -X PATCH ... allow_auto_merge=true` returns success, while
+the value stays `false` — it is plan-gated, not a bug in the command. Verified:
+it flipped to `true` the moment the same repo was made public.
 
-- **No branch protection or rulesets are configured.** This is deliberate. So
-  `main` accepts direct pushes and a red PR can still be merged. CODEOWNERS
-  still auto-requests review (that needs no protection) but nothing enforces it.
-  Auto-merge also rarely surfaces, since GitHub only offers it on a PR blocked
-  by a required check.
+So **always read the value back**, and report what is actually true:
+
+- `true` → auto-merge is on
+- `false` on a private repo → "auto-merge unavailable on private repos on this
+  plan; enabled everything else"
+
+Never report auto-merge as enabled on the strength of a zero exit code.
+`delete_branch_on_merge` does apply on private repos.
+
+### No branch protection by default
+
+`main` accepts direct pushes and a red PR can still be merged. CODEOWNERS
+auto-requests review without protection, but nothing enforces it, and auto-merge
+rarely surfaces since GitHub only offers it on a PR blocked by a required check.
+
+If the user wants `main` actually protected — particularly on a repo where
+Claude is the only other contributor — see "Stopping Claude from pushing to
+main" in the plugin README. The short version is a ruleset requiring a passing
+CI check, which needs no second reviewer.
 
 ## 5. Verify before declaring done
 

@@ -23,8 +23,15 @@ set -uo pipefail
 # uv in ~/.local/bin and updates the shell profile, but a non-login,
 # non-interactive shell never sources that profile -- so a second run does not
 # see uv and reinstalls it every time. Same story for fnm's node.
-for d in "$HOME/.local/bin" "$HOME/.local/share/fnm" /opt/homebrew/bin /usr/local/bin; do
-  [ -d "$d" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
+# Create the user bin directory BEFORE building PATH. Guarding each entry on
+# [ -d ] meant that on a fresh account ~/.local/bin did not exist yet, so it was
+# never added -- and every user-space install then succeeded while `command -v`
+# still could not find the binary, reporting a false failure.
+mkdir -p "$HOME/.local/bin" 2>/dev/null
+
+for d in "$HOME/.local/bin" "$HOME/.local/node/bin" "$HOME/.local/share/fnm" \
+         /opt/homebrew/bin /usr/local/bin; do
+  case ":$PATH:" in *":$d:"*) ;; *) PATH="$d:$PATH" ;; esac
 done
 for d in "$HOME"/.nvm/versions/node/*/bin "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
   [ -d "$d" ] && PATH="$d:$PATH"
@@ -100,8 +107,44 @@ ensure() {
 
 # ---------------------------------------------------------------- installers -
 
-install_git() { pkg_install git; }
-install_jq()  { pkg_install jq; }
+# Can we actually install system packages? Without root and without sudo, apt is
+# unavailable, which is the normal case in a locked-down sandbox. Everything
+# below therefore has a user-space fallback into ~/.local/bin.
+can_pkg_install() {
+  case "$PLATFORM" in
+    macos) command -v brew >/dev/null 2>&1 ;;
+    linux) command -v apt-get >/dev/null 2>&1 && { [ "$(id -u)" -eq 0 ] || [ -n "$SUDO" ]; } ;;
+  esac
+}
+
+BIN_DIR="$HOME/.local/bin"
+mkdir -p "$BIN_DIR" 2>/dev/null
+
+# arch_tag <style> : normalise uname -m for release asset names.
+arch_tag() {
+  case "$(uname -m)" in
+    aarch64|arm64) [ "$1" = x64 ] && echo arm64 || echo arm64 ;;
+    x86_64)        [ "$1" = amd64 ] && echo amd64 || echo x64 ;;
+    *)             echo unsupported ;;
+  esac
+}
+
+install_git() {
+  # git genuinely needs a package manager on Linux; there is no sane user-space
+  # install. It is present on virtually every image, so this rarely matters.
+  pkg_install git
+}
+
+install_jq() {
+  pkg_install jq && return 0
+  # jq matters more than the others: format.sh and guard-bash.sh both parse hook
+  # JSON with it, so without jq the hooks silently do nothing. It is a single
+  # static binary, so fall back to the release asset.
+  [ "$PLATFORM" = linux ] || return 1
+  local a; a=$(arch_tag amd64); [ "$a" = unsupported ] && return 1
+  curl -fsSL "https://github.com/jqlang/jq/releases/latest/download/jq-linux-${a}" \
+       -o "$BIN_DIR/jq" 2>/dev/null && chmod +x "$BIN_DIR/jq"
+}
 
 install_curl() { pkg_install curl; }
 
@@ -123,7 +166,28 @@ install_node() {
       # installing it first this whole branch fails its dependency check and
       # falls through to the apt fallback, which looks like success (node exists)
       # while silently leaving you on an EOL runtime.
-      apt_install unzip
+      # fnm's installer hard-requires unzip and exits without it. When apt is
+      # unavailable (no root, no sudo) we cannot provide unzip, so skip fnm
+      # entirely and take the official Node tarball instead -- it is .tar.xz,
+      # which tar handles without any extra tooling.
+      if ! command -v unzip >/dev/null 2>&1 && can_pkg_install; then
+        apt_install unzip
+      fi
+
+      if ! command -v unzip >/dev/null 2>&1; then
+        local a ver
+        a=$(arch_tag x64); [ "$a" = unsupported ] && return 1
+        ver=$(curl -fsSL https://nodejs.org/dist/index.json 2>/dev/null \
+              | grep -m1 -o '"version":"v[^"]*"' | sed 's/.*"v\([^"]*\)"/\1/')
+        [ -z "$ver" ] && return 1
+        mkdir -p "$HOME/.local/node"
+        # .tar.gz, not .tar.xz: a minimal Debian image has no `xz` binary, so
+        # tar -xJ fails with nothing useful in the output.
+        curl -fsSL "https://nodejs.org/dist/v${ver}/node-v${ver}-linux-${a}.tar.gz" 2>/dev/null \
+          | tar -xz -C "$HOME/.local/node" --strip-components=1 2>/dev/null || return 1
+        PATH="$HOME/.local/node/bin:$PATH"; export PATH
+        return 0
+      fi
 
       if curl -fsSL https://fnm.vercel.app/install | bash -s -- --skip-shell >/dev/null 2>&1 \
          && [ -x "$HOME/.local/share/fnm/fnm" ]; then
@@ -153,7 +217,10 @@ install_gitleaks() {
       # Not in Debian's repos; take the release binary. Architecture naming
       # follows the project's own release assets.
       local ver arch os_tag
-      ver=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest \
+      # `grep -m1` exits as soon as it matches, closing the pipe under curl,
+      # which then exits 23 and prints "Failure writing output to destination".
+      # Harmless, but it looks like a failure in the middle of a successful run.
+      ver=$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest 2>/dev/null \
             | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')
       [ -z "$ver" ] && return 1
       case "$(uname -m)" in
@@ -162,9 +229,12 @@ install_gitleaks() {
         *)             return 1 ;;
       esac
       os_tag=linux
-      curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_${os_tag}_${arch}.tar.gz" \
-        | tar -xz -C "$HOME/.local/bin" gitleaks 2>/dev/null
-      chmod +x "$HOME/.local/bin/gitleaks" 2>/dev/null
+      # stderr suppressed: tar closes the pipe once it has the one member it
+      # wants, which makes curl exit 23 and print an alarming "Failure writing
+      # output" even though the extraction succeeded.
+      curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${ver}/gitleaks_${ver}_${os_tag}_${arch}.tar.gz" 2>/dev/null \
+        | tar -xz -C "$BIN_DIR" gitleaks 2>/dev/null
+      chmod +x "$BIN_DIR/gitleaks" 2>/dev/null
       ;;
   esac
 }
@@ -173,6 +243,19 @@ install_gh() {
   case "$PLATFORM" in
     macos) pkg_install gh ;;
     linux)
+      # No root: take the release tarball into ~/.local/bin instead of adding
+      # an apt source, which needs privileges.
+      if ! can_pkg_install; then
+        local a ver
+        a=$(arch_tag amd64); [ "$a" = unsupported ] && return 1
+        ver=$(curl -fsSL https://api.github.com/repos/cli/cli/releases/latest 2>/dev/null \
+              | grep -m1 '"tag_name"' 2>/dev/null | sed -E 's/.*"v?([^"]+)".*/\1/')
+        [ -z "$ver" ] && return 1
+        curl -fsSL "https://github.com/cli/cli/releases/download/v${ver}/gh_${ver}_linux_${a}.tar.gz" 2>/dev/null \
+          | tar -xz -C /tmp 2>/dev/null || return 1
+        cp "/tmp/gh_${ver}_linux_${a}/bin/gh" "$BIN_DIR/gh" 2>/dev/null && chmod +x "$BIN_DIR/gh"
+        return $?
+      fi
       # gh is not in Debian stable's default repos; add GitHub's own.
       $SUDO mkdir -p -m 755 /etc/apt/keyrings 2>/dev/null
       curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -253,7 +336,9 @@ write_profile_block() {
     cat >> "$rc" <<'PROFILE'
 
 # >>> bo-standards bootstrap >>>
-case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$HOME/.local/bin:$PATH" ;; esac
+for _d in "$HOME/.local/bin" "$HOME/.local/node/bin"; do
+  case ":$PATH:" in *":$_d:"*) ;; *) PATH="$_d:$PATH" ;; esac
+done
 for _d in "$HOME"/.local/share/fnm/node-versions/*/installation/bin; do
   [ -d "$_d" ] && PATH="$_d:$PATH"
 done
