@@ -115,15 +115,9 @@ your machine is never committed.
 plugin can keep resolving from a stale cache, so it looks installed while the
 source is gone. `~/claude-toolkit` and leave it there.
 
-Two consequences:
-
-- A directory source records an **absolute path**, so it is machine-local. If
-  the repo is shared, put that wiring in `.claude/settings.local.json`
-  (gitignored) rather than the committed `settings.json` — otherwise colleagues
-  get a path that does not exist on their machine.
-- There is no `marketplace update` to run: the directory *is* the source, so
-  edits are live. You still need to restart Claude Code for hooks and skills to
-  be re-read.
+There is also no `marketplace update` to run in this mode — the directory *is*
+the source, so your edits are live. You still need to restart Claude Code for
+hooks and skills to be re-read.
 
 ## Updating
 
