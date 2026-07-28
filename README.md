@@ -34,7 +34,7 @@ most common point of confusion, so, precisely:
 | | Active immediately? |
 |---|---|
 | Format hook, Bash guard, session-start | ✅ **yes**, from the next session |
-| The 7 skills | ⚠️ **available, but only run when invoked** — by you (`/lint`) or when Claude judges one applies |
+| The 8 skills | ⚠️ **available, but only run when invoked** — by you (`/lint`) or when Claude judges one applies |
 | Templates | ❌ **inert files.** Nothing reads them unless a skill does |
 | `pyproject.toml`, dev dependencies | ❌ **untouched** |
 
@@ -66,6 +66,31 @@ Then, in the repo:
 ```
 
 …and ask Claude to run the **`adopt-standards`** skill.
+
+## Without GitHub
+
+**GitHub is not required.** Verified: a marketplace in a plain directory with no
+git repository at all installs cleanly and its skills register. Useful on a work
+machine where publishing would drag a reviewer into something that is just your
+own tooling.
+
+```bash
+claude plugin marketplace add /path/to/your-toolkit --scope project
+claude plugin install your-standards@your-toolkit --scope project
+```
+
+The only structure needed is `.claude-plugin/marketplace.json` plus
+`plugins/<name>/.claude-plugin/plugin.json`. No remote, no commits, no git.
+
+Two consequences:
+
+- A directory source records an **absolute path**, so it is machine-local. If
+  the repo is shared, put that wiring in `.claude/settings.local.json`
+  (gitignored) rather than the committed `settings.json` — otherwise colleagues
+  get a path that does not exist on their machine.
+- There is no `marketplace update` to run: the directory *is* the source, so
+  edits are live. You still need to restart Claude Code for hooks and skills to
+  be re-read.
 
 ## Updating
 
@@ -126,6 +151,7 @@ indirection, or a `cd` elsewhere first. A seatbelt.
 | `ci-workflow` | Generating or repairing `.github/workflows/ci.yml` |
 | `update-docs` | README/CLAUDE.md/docstrings have drifted from the code |
 | `fix-security` | Dependabot alerts, leaked credentials, CVEs, code scanning |
+| `deploy-toolkit` | Rolling out across a machine and several existing repos |
 
 ## Templates
 
@@ -165,19 +191,36 @@ There is **no first-party Anthropic plugin for authoring documentation or for
 remediating security findings** — `context7` only looks docs up. That gap is why
 `update-docs` and `fix-security` are in this plugin.
 
-## Migrating from a user-level hook
+## Deploying to a machine that already has a setup
 
-If a machine still has the pre-plugin `~/.claude/hooks/lint-format.sh` and
-`/lint` command, retire them — otherwise two formatters run on every edit and
-the old one still reformats Markdown:
+Use the **`deploy-toolkit`** skill, which sequences the machine-level work and
+then goes project by project. The migration step is:
 
 ```bash
-./plugins/bo-standards/scripts/migrate-user-hooks.sh --dry-run
+./plugins/bo-standards/scripts/migrate-legacy.sh                        # audit only
+./plugins/bo-standards/scripts/migrate-legacy.sh --apply                # hooks + commands
+./plugins/bo-standards/scripts/migrate-legacy.sh --apply --include-configs
 ```
 
-Renames both to `*.retired`, backs up `settings.json`, and removes only the
-`PostToolUse` block. **Nothing is deleted** — `~/.claude` is not version
-controlled, so a delete there is unrecoverable.
+**Audit mode is the default and changes nothing.** It finds:
+
+| Category | Default action |
+|---|---|
+| `~/.claude/hooks/*lint*`, `*format*`, `*eslint*` … | retired with `--apply` |
+| user commands/skills colliding with a plugin skill | retired with `--apply` |
+| `PostToolUse`/`PreToolUse`/`Stop` in user **or project** `settings.json` | removed with `--apply`, backed up first |
+| `~/.config/ruff/ruff.toml`, `mypy/config`, `.markdownlint.*`, `.eslintrc*`, `.prettierrc`, `pyrightconfig.json` | **reported only** unless `--include-configs` |
+| any **unrecognised** hook | reported and **left alone** — never swept up |
+
+**`~/.config/ruff/ruff.toml` deserves a decision, not a reflex.** A global
+`select = [...]` *replaces* ruff's defaults, so every project without its own
+config is linted by a different ruleset than an adopted one — silently. Retiring
+it makes those projects fall back to ruff's defaults, which is a real change.
+
+**Nothing is deleted.** Files become `*.retired` and `settings.json` gets a
+timestamped `.bak`, because `~/.claude` and `~/.config` are not version
+controlled. Only the hook keys are stripped from `settings.json`; `model`,
+`permissions`, and `enabledPlugins` are untouched.
 
 ## bootstrap.sh
 
@@ -317,9 +360,9 @@ plugins/bo-standards/
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
 ├── scripts/    lib.sh, bootstrap.sh, format.sh, guard-bash.sh, session-start.sh,
-│               install-plugins.sh, migrate-user-hooks.sh
-├── skills/     adopt-standards, ci-workflow, fix-security, lint, pr-check,
-│               scaffold-project, update-docs
+│               install-plugins.sh, migrate-legacy.sh
+├── skills/     adopt-standards, ci-workflow, deploy-toolkit, fix-security, lint,
+│               pr-check, scaffold-project, update-docs, deploy-toolkit
 └── templates/  pyproject-snippet.toml, biome.json, ci.yml, codeql.yml,
                 dependabot.yml, CLAUDE.md, settings.json, CODEOWNERS,
                 PULL_REQUEST_TEMPLATE.md, ISSUE_TEMPLATE/
