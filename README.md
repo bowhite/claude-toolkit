@@ -245,15 +245,151 @@ There is **no first-party Anthropic plugin for authoring documentation or for
 remediating security findings** — `context7` only looks docs up. That gap is why
 `update-docs` and `fix-security` are in this plugin.
 
-## Deploying to a machine that already has a setup
+## Deployment walkthrough: an existing Debian machine
 
-Use the **`deploy-toolkit`** skill, which sequences the machine-level work and
-then goes project by project. The migration step is:
+Copy-paste, in order. Written for the awkward case: a machine that already has
+several projects, a user-level lint hook, a `/lint` command, and global
+`~/.config` tool configs — and where you may not have `sudo`.
+
+### 1. Get the toolkit
 
 ```bash
-./plugins/bo-standards/scripts/migrate-legacy.sh                        # audit only
-./plugins/bo-standards/scripts/migrate-legacy.sh --apply                # hooks + commands
-./plugins/bo-standards/scripts/migrate-legacy.sh --apply --include-configs
+git clone https://github.com/bowhite/claude-toolkit ~/claude-toolkit
+```
+
+```bash
+cd ~/claude-toolkit && git remote set-url --push origin no-push
+```
+
+Fetch still works, push is refused — so you can pull updates and commit local
+changes without ever pushing to someone else's repo. If you diverge
+substantially, rename `name` in `.claude-plugin/marketplace.json` (e.g.
+`work-toolkit`) so it cannot collide with the upstream one.
+
+### 2. Install the machine tooling
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/bootstrap.sh --no-project
+```
+
+Installs `uv`, `node`, `jq`, `gh`, `gitleaks` into `~/.local/bin` — **no sudo
+needed**. `git` is the one exception: it needs a package manager, and the script
+reports it and exits 1. Install `git` first if it is missing; nothing else works
+without it.
+
+Open a new shell afterwards (it appends a `PATH` block to your profile), then
+check:
+
+```bash
+for t in uv node jq gh gitleaks git; do printf '%-10s %s\n' "$t" "$(command -v $t || echo MISSING)"; done
+```
+
+### 3. Install the official Anthropic plugins
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/install-plugins.sh
+```
+
+### 4. Audit what is already on the machine — changes nothing
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh
+```
+
+**Read this output before going further.** It reports your existing hooks,
+`/lint` command, `settings.json` hook wiring, and global `~/.config` tool
+configs, and tells you which it would retire.
+
+Pay attention to `~/.config/ruff/ruff.toml`. If it uses `select = [...]` it
+**replaces** ruff's defaults, so projects that have not adopted yet are linted
+by a different ruleset than adopted ones — silently. Retiring it changes how
+those projects lint. That is a decision, not a formality.
+
+### 5. Retire the old setup
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh --apply
+```
+
+Hooks and commands only. Once you have decided about the configs above:
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh --apply --include-configs
+```
+
+Nothing is deleted — files become `*.retired`, `settings.json` gets a
+timestamped `.bak`, and only the hook keys are stripped from it. Unrecognised
+hooks are reported and left alone. To undo, rename the files back.
+
+### 6. Wire the plugin into every project
+
+Check first — the glob is literal and will match anything in the directory:
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/enable-in-projects.sh --dry-run ~/work/*/
+```
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/enable-in-projects.sh ~/work/*/
+```
+
+For repos shared with colleagues, use `--local` instead: it writes
+`.claude/settings.local.json` and gitignores it, so a path that only exists on
+your machine is never committed.
+
+### 7. Restart Claude Code
+
+Hooks and skills are read at session start. Until you restart, the old hook is
+still live and the new one is not.
+
+### 8. Adopt each project, one at a time
+
+Open Claude Code in a project and ask it to run **`adopt-standards`**.
+
+Steps 1–7 wire the plugin; they do **not** install `ruff`/`ty` or touch
+`pyproject.toml`. This is the step that does.
+
+Do the first project on its own and look at the result before continuing — the
+backlog varies a lot between repos, and the burn-down policy is worth agreeing
+on real numbers.
+
+```bash
+cd ~/work/some-project && git switch -c adopt-bo-standards
+```
+
+**If a repo has uncommitted work**, say so — adoption runs `ruff --fix` across
+the tree and would tangle its changes into yours. The safe variant is config
+only: dependencies, config, wiring, and a burn-down recording every existing
+violation, with no source files touched.
+
+### 9. Check for secrets before creating history
+
+For a project that is not yet a git repo, scan **before** the first commit —
+once a credential is committed, deleting the file does not remove it.
+
+```bash
+gitleaks dir . --no-banner
+```
+
+```bash
+grep -rnE '(password|passwd|secret|api_?key|token)\s*=\s*["'"'"'][^"'"'"']{4,}' --include='*.py' .
+```
+
+Run **both**. `gitleaks` is good at structured tokens (JWTs, cloud keys) and
+misses generic assignments — a plain `password = "hunter2"` does not match its
+rules and was found only by the grep.
+
+---
+
+## Migration reference
+
+Use the **`deploy-toolkit`** skill to have Claude sequence the above. The
+migration step in detail:
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh              # audit only
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh --apply      # hooks + commands
+~/claude-toolkit/plugins/bo-standards/scripts/migrate-legacy.sh --apply --include-configs
 ```
 
 **Audit mode is the default and changes nothing.** It finds:
