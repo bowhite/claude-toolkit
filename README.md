@@ -59,13 +59,17 @@ That writes `.claude/settings.json`, which **must be committed**. It is what
 carries the plugin into a fresh clone or a cloud sandbox. Gitignore only
 `.claude/settings.local.json` — never `.claude/` wholesale.
 
-Then, in the repo:
+Then set the machine up and onboard the repo:
 
 ```bash
-./scripts/bootstrap.sh
+~/claude-toolkit/plugins/bo-standards/scripts/bootstrap.sh
 ```
 
-…and ask Claude to run the **`adopt-standards`** skill.
+…and ask Claude to run the **`adopt-standards`** skill. That is the step that
+installs `ruff`/`ty` and edits `pyproject.toml` — installing the plugin does not.
+
+(`scaffold-project` copies `bootstrap.sh` into new projects as `scripts/bootstrap.sh`,
+so in those it is just `./scripts/bootstrap.sh`.)
 
 ## Without GitHub
 
@@ -114,6 +118,12 @@ your machine is never committed.
 **Keep the toolkit at a stable path.** A wrong path does not fail loudly — the
 plugin can keep resolving from a stale cache, so it looks installed while the
 source is gone. `~/claude-toolkit` and leave it there.
+
+**Rename the marketplace if you diverge.** If your copy stops tracking this one,
+change `name` in `.claude-plugin/marketplace.json` and the plugin directory to
+something like `work-toolkit` / `work-standards`. Two different marketplaces both
+called `bo-toolkit` on one machine will collide, and the failure is confusing —
+you get someone else's version of a skill with no indication why.
 
 There is also no `marketplace update` to run in this mode — the directory *is*
 the source, so your edits are live. You still need to restart Claude Code for
@@ -180,6 +190,19 @@ indirection, or a `cd` elsewhere first. A seatbelt.
 | `fix-security` | Dependabot alerts, leaked credentials, CVEs, code scanning |
 | `deploy-toolkit` | Rolling out across a machine and several existing repos |
 
+## Scripts
+
+Run directly; none of them need Claude.
+
+| Script | What it does |
+|---|---|
+| `bootstrap.sh` | Machine tooling + project dependencies |
+| `install-plugins.sh` | The official Anthropic plugins, at user scope |
+| `migrate-legacy.sh` | Audit and retire a pre-plugin setup |
+| `enable-in-projects.sh` | Wire the plugin into many projects at once |
+| `format.sh`, `guard-bash.sh`, `session-start.sh` | The hooks — invoked by Claude Code, not by you |
+| `lib.sh` | Shared helpers, sourced by the hooks |
+
 ## Templates
 
 Single sources of truth. Skills read these rather than restating them, so
@@ -194,6 +217,10 @@ scaffold, adopt, and CI cannot drift apart.
 | `settings.json` | Per-project plugin wiring |
 | `CODEOWNERS` | **Comments only — no owner assigned.** See below |
 | `PULL_REQUEST_TEMPLATE.md`, `ISSUE_TEMPLATE/` | GitHub templates |
+
+Templates are **inert** — nothing reads them unless a skill does. Editing one
+changes what future `adopt-standards` / `scaffold-project` runs emit; it does
+not retroactively change any project.
 
 ## Delegated to official Anthropic plugins
 
@@ -252,14 +279,38 @@ controlled. Only the hook keys are stripped from `settings.json`; `model`,
 ## bootstrap.sh
 
 Installs only what uv and npm cannot provide — `uv`, `node`, `jq`, `gh`, `git`,
-`gitleaks` — then runs `uv sync` and `npm ci`.
+`gitleaks` — then installs the project's own dependencies.
 
 ```bash
+# from this repo
+./plugins/bo-standards/scripts/bootstrap.sh --no-project
+
+# from a scaffolded project, where scaffold-project copies it to scripts/
 ./scripts/bootstrap.sh              # tooling + project dependencies
 ./scripts/bootstrap.sh --no-project # tooling only
 ```
 
-Idempotent: a second run installs nothing.
+### What it skips
+
+**Machine tooling** is skipped whenever the binary is **on `PATH`** — that is the
+actual test, not "global vs local". Bootstrap deliberately prepends the places
+these land, so it finds tools installed by Homebrew, nvm, fnm, the Astral
+installer, or its own `~/.local/bin` fallbacks. On this Mac it correctly detects
+all six across four different locations and installs nothing.
+
+A tool installed somewhere unusual and *not* on `PATH` will be reinstalled into
+`~/.local/bin`. That is the intended behaviour — an unreachable binary is not
+usable by the hooks either.
+
+**Project dependencies:**
+
+- `uv sync` is already idempotent — a no-op when the environment matches.
+- `npm ci` is **not**: it deletes `node_modules` and reinstalls from scratch
+  every run. So bootstrap skips it when `package-lock.json` is no newer than
+  npm's own `node_modules/.package-lock.json`, and reinstalls when it is.
+- `package.json` is located up to 3 levels deep, so a `frontend/` subdirectory
+  is found — checking only the repo root skipped the Node half entirely in most
+  of these projects.
 
 **Verified on macOS 26 (arm64) and Debian bookworm (arm64)**, the latter in an
 Apple `container` VM.
@@ -389,7 +440,7 @@ plugins/bo-standards/
 ├── scripts/    lib.sh, bootstrap.sh, format.sh, guard-bash.sh, session-start.sh,
 │               install-plugins.sh, migrate-legacy.sh, enable-in-projects.sh
 ├── skills/     adopt-standards, ci-workflow, deploy-toolkit, fix-security, lint,
-│               pr-check, scaffold-project, update-docs, deploy-toolkit
+│               pr-check, scaffold-project, update-docs
 └── templates/  pyproject-snippet.toml, biome.json, ci.yml, codeql.yml,
                 dependabot.yml, CLAUDE.md, settings.json, CODEOWNERS,
                 PULL_REQUEST_TEMPLATE.md, ISSUE_TEMPLATE/

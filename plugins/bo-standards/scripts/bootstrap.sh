@@ -301,22 +301,41 @@ if [ "$SKIP_PROJECT" -eq 0 ]; then
     fi
   fi
 
-  if [ -f "$root/package-lock.json" ]; then
-    step "Installing Node dependencies"
-    if (cd "$root" && npm ci); then
-      log "npm ci complete"
-    else
-      failed+=("npm ci")
-      log "FAILED: npm ci"
-    fi
-  elif [ -f "$root/package.json" ]; then
-    step "Installing Node dependencies (no lockfile)"
-    if (cd "$root" && npm install); then
-      log "npm install complete"
-    else
-      failed+=("npm install")
-      log "FAILED: npm install"
-    fi
+  # package.json is frequently in a subdirectory (frontend/), not at the repo
+  # root -- checking only the root silently skipped the Node half entirely in
+  # most of these projects.
+  node_dirs=$(find "$root" -maxdepth 3 -name package.json -not -path '*/node_modules/*' \
+                -exec dirname {} \; 2>/dev/null | sort -u)
+
+  if [ -n "$node_dirs" ]; then
+    while IFS= read -r nd; do
+      [ -n "$nd" ] || continue
+      rel="${nd#"$root"/}"; [ "$rel" = "$nd" ] && rel="."
+
+      # `npm ci` deletes node_modules and reinstalls from scratch every time --
+      # correct for CI, wrong for a script meant to be re-run.
+      #
+      # Compare against node_modules/.package-lock.json, npm's own record of the
+      # installed tree. Comparing against the node_modules directory itself does
+      # not work: `npm install` writes package-lock.json after populating the
+      # directory, so the lockfile is always the newer of the two.
+      if [ -d "$nd/node_modules" ] \
+         && { [ ! -f "$nd/package-lock.json" ] \
+              || { [ -f "$nd/node_modules/.package-lock.json" ] \
+                   && [ ! "$nd/package-lock.json" -nt "$nd/node_modules/.package-lock.json" ]; }; }; then
+        log "Node deps in $rel already installed"
+        continue
+      fi
+
+      step "Installing Node dependencies ($rel)"
+      if [ -f "$nd/package-lock.json" ]; then
+        if (cd "$nd" && npm ci); then log "npm ci complete"
+        else failed+=("npm ci ($rel)"); log "FAILED: npm ci in $rel"; fi
+      else
+        if (cd "$nd" && npm install); then log "npm install complete"
+        else failed+=("npm install ($rel)"); log "FAILED: npm install in $rel"; fi
+      fi
+    done <<< "$node_dirs"
   fi
 fi
 
