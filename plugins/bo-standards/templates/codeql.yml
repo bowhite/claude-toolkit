@@ -1,0 +1,42 @@
+# CodeQL code scanning.
+#
+# PUBLIC REPOSITORIES ONLY. On a private repo this workflow runs but the upload
+# step fails, because code scanning there requires GitHub Advanced Security.
+# The ci-workflow skill only installs this file when the repo is public --
+# verify before adding it:
+#
+#   gh api repos/<owner>/<name> --jq .private
+#
+# Most of these repos are private, so this file usually does not apply.
+name: CodeQL
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  schedule:
+    # CodeQL's rules improve over time, so rescan unchanged code periodically.
+    - cron: "27 4 * * 1"
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Drop languages the repo does not contain, or the job fails with
+        # "no source code found".
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: github/codeql-action/init@v4
+        with:
+          # `languages`, plural -- `language` is silently not an input.
+          languages: ${{ matrix.language }}
+
+      - uses: github/codeql-action/analyze@v4

@@ -25,7 +25,9 @@ Then add to `pyproject.toml`:
 
 ```toml
 [tool.ruff.lint]
-extend-select = ["I", "UP", "B", "SIM", "ANN", "PYI", "D"]
+# Astral's recommendation + "D". ruff 0.16 already defaults to I/UP/B/SIM, so
+# those are deliberately not listed.
+extend-select = ["ANN", "PYI", "D"]
 preview = true
 
 [tool.ruff.lint.pydocstyle]
@@ -61,11 +63,26 @@ commit one — scaffolded code must not start the project in debt.
 Only if asked:
 
 ```bash
-npm create vite@latest . -- --template react-ts
-npm i -D @biomejs/biome
+npm create vite@latest frontend -- --template react-ts
+cd frontend && npm i -D @biomejs/biome typescript
 ```
 
 Copy `templates/biome.json`. The `ci-workflow` skill adds the Node job.
+
+**Include TypeScript and a `tsconfig.json`, and add a `typecheck` script:**
+
+```json
+{ "scripts": { "typecheck": "tsc --noEmit", "build": "tsc --noEmit && vite build" } }
+```
+
+Biome does **not** type-check — it has no type checking at all. Without `tsc`
+a TypeScript frontend is linted and formatted but never actually type-checked,
+which is the same gap `ty` closes on the Python side. `lint`, `pr-check`, and
+CI all run `tsc --noEmit` whenever a `tsconfig.json` is present.
+
+Putting the frontend in `frontend/` rather than the repo root is fine and
+matches the existing projects — everything resolves the Node directory by
+finding the nearest `package.json`.
 
 ## 4. GitHub
 

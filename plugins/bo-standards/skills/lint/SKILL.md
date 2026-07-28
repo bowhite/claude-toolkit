@@ -14,13 +14,30 @@ first with `git ls-files` so you never invoke a tool on zero files.
 
 ## Tool resolution
 
-Tooling is a **per-project dev dependency**, not a global install. Use
-`uv run <tool>` and `npx <tool>` so you get the version this project pins, which
-is the same version CI will use.
+Tooling is a **per-project dev dependency**, not a global install.
 
-If a tool is missing, do not fall back to `uvx` or a global binary — that
-reintroduces exactly the version drift this setup exists to prevent. Say the
-project has not adopted the standards and offer the `adopt-standards` skill.
+- Python: `uv run <tool>`
+- Node: **`./node_modules/.bin/<tool>`**, never bare `npx`
+
+**Do not use `npx` as a fallback.** Verified: `npx --yes @biomejs/biome` silently
+downloads an unpinned latest from the network, formats with it, and leaves
+nothing in the project — so local and CI can format the same file differently.
+That is precisely the drift per-project dev dependencies exist to prevent.
+
+If a tool is missing, do not fall back to `uvx`, `npx`, or a global binary. Say
+the project has not adopted the standards and offer the `adopt-standards` skill.
+
+## Find the Node project first
+
+`package.json` is often **not** at the repo root — two of three Node projects
+here keep it in `frontend/`. Locate it before running anything:
+
+```bash
+find . -name package.json -not -path '*/node_modules/*' -maxdepth 3
+```
+
+Run every Node command from that directory so `biome.json` and `tsconfig.json`
+are discovered. A repo can have more than one; handle each.
 
 ## 1. Python — format + lint
 
@@ -45,9 +62,11 @@ result stop predicting CI.
 
 ## 3. JS / TS / JSX / TSX / CSS / JSON — Biome
 
+From the Node project directory:
+
 ```bash
-npx biome check --write <target>
-npx biome check <target>
+./node_modules/.bin/biome check --write .
+./node_modules/.bin/biome check .
 ```
 
 The project's `biome.json` sets `vcs.useIgnoreFile`, so Biome honors
@@ -55,7 +74,34 @@ The project's `biome.json` sets `vcs.useIgnoreFile`, so Biome honors
 repo has no `biome.json`, pass the flags explicitly:
 `--vcs-enabled=true --vcs-client-kind=git --vcs-use-ignore-file=true`.
 
-## 4. Markdown — nothing
+## 4. TypeScript — type check
+
+**Only when a `tsconfig.json` exists.** From the Node project directory:
+
+```bash
+./node_modules/.bin/tsc --noEmit
+```
+
+**Biome does not type-check — it has no type checking whatsoever.** Skipping
+this leaves a TypeScript project linted and formatted but never actually
+type-checked, which is the gap `ty` closes on the Python side. If the project
+defines a `typecheck` script, run that instead so the flags stay in one place.
+
+## 5. Secrets — gitleaks
+
+```bash
+gitleaks git . --no-banner
+```
+
+Scans **commit history**, not the working tree. Use `gitleaks git`, not
+`gitleaks dir`: the directory mode reads gitignored files too and reports local
+`.env` credentials that were never committed, which is noise. History is what
+actually matters, because deleting a file does not remove its contents from git.
+
+This is also the only secret scanning available on private repos — GitHub's own
+is paywalled behind Advanced Security there.
+
+## 6. Markdown — nothing
 
 Markdown is **deliberately not linted or formatted**. Biome does not format it
 (verified: `.md` passes through unchanged), and no other Markdown tool is used

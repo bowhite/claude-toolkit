@@ -50,7 +50,11 @@ Splice into `pyproject.toml`, preserving anything already there:
 
 ```toml
 [tool.ruff.lint]
-extend-select = ["I", "UP", "B", "SIM", "ANN", "PYI", "D"]
+# Astral's documented recommendation is ["ANN", "PYI"] + preview. "D" is the one
+# addition: docstrings. Do NOT re-add I/UP/B/SIM -- ruff 0.16 enables those by
+# default (verified behaviourally: defaults alone flag I001, UP045, SIM102,
+# BLE001), so listing them is redundant.
+extend-select = ["ANN", "PYI", "D"]
 preview = true
 
 [tool.ruff.lint.pydocstyle]
