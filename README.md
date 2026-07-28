@@ -82,6 +82,39 @@ claude plugin install your-standards@your-toolkit --scope project
 The only structure needed is `.claude-plugin/marketplace.json` plus
 `plugins/<name>/.claude-plugin/plugin.json`. No remote, no commits, no git.
 
+### Recommended setup for a machine with no GitHub
+
+```bash
+git clone https://github.com/bowhite/claude-toolkit ~/claude-toolkit
+cd ~/claude-toolkit && git remote set-url --push origin no-push
+```
+
+**`set-url --push no-push` beats removing the remote**: `git fetch` still pulls
+upstream changes, while any `git push` fails outright. Verified — fetch exits 0,
+push is rejected. Commit your local edits on a branch; you keep both your changes
+and the ability to pull mine.
+
+Then wire it into every project at once:
+
+```bash
+~/claude-toolkit/plugins/bo-standards/scripts/enable-in-projects.sh ~/work/*/
+```
+
+The wiring is **identical in every project** — the path points at the toolkit,
+not at the project — so copying `.claude/settings.json` between repos genuinely
+works. Verified: a project that only had the file copied in, with no install
+command ever run, reports the plugin enabled at project scope.
+
+`enable-in-projects.sh` merges into an existing `settings.json` rather than
+overwriting it, and refuses to write a path with no `marketplace.json` at it.
+Use `--local` for repos shared with colleagues: it writes
+`settings.local.json` and gitignores it, so an absolute path that exists only on
+your machine is never committed.
+
+**Keep the toolkit at a stable path.** A wrong path does not fail loudly — the
+plugin can keep resolving from a stale cache, so it looks installed while the
+source is gone. `~/claude-toolkit` and leave it there.
+
 Two consequences:
 
 - A directory source records an **absolute path**, so it is machine-local. If
@@ -360,7 +393,7 @@ plugins/bo-standards/
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
 ├── scripts/    lib.sh, bootstrap.sh, format.sh, guard-bash.sh, session-start.sh,
-│               install-plugins.sh, migrate-legacy.sh
+│               install-plugins.sh, migrate-legacy.sh, enable-in-projects.sh
 ├── skills/     adopt-standards, ci-workflow, deploy-toolkit, fix-security, lint,
 │               pr-check, scaffold-project, update-docs, deploy-toolkit
 └── templates/  pyproject-snippet.toml, biome.json, ci.yml, codeql.yml,
